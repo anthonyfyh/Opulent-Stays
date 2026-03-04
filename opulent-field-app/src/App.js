@@ -262,7 +262,7 @@ const FIELD_APP_HEADER_FIELDS = [
   { key: "# Bath", type: "dropdown", notion_property: "# Bath",
     options: ["0","0.5","1","1.5","2","2.5","3","3.5","4","4.5","5","5.5","6","6.5","7","7.5","8","8.5","9","9.5","10"] },
   { key: "# Rooms", type: "dropdown", notion_property: "# Rooms",
-    options: ["1","2","3","4","5","6","7","8","9","10"] },
+    options: ["0","1","2","3","4","5","6","7","8","9","10"] },
   { key: "Max Occupancy", type: "number", notion_property: "Max Occupancy" },
   { key: "Privacy", type: "dropdown", notion_property: "Privacy",
     options: ["Owner lives upstairs", "Tenant lives upstairs", "Guest gets whole place"] },
