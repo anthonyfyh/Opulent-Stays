@@ -66,6 +66,13 @@ const notion = {
     });
     return res.json();
   },
+  async archivePage(pageId) {
+    const res = await fetch(`/api/notion?endpoint=pages/${pageId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: true }),
+    });
+    return res.json();
+  },
 };
 
 // ============================================================
@@ -256,7 +263,7 @@ async function parsePropertyPage(pageId) {
 // ============================================================
 const FIELD_APP_HEADER_FIELDS = [
   { key: "Property Type", type: "dropdown", notion_property: "Property Type",
-    options: ["Room", "Laneway", "Basement", "House", "Apartment", "Duplex"] },
+    options: ["Room", "Laneway", "Basement", "House", "Apartment", "Duplex", "Backyard Secondary Suite (ground level)"] },
   { key: "City", type: "dropdown", notion_property: "City",
     options: ["Delta", "Langley", "Surrey", "Richmond", "Vancouver", "West Van", "North Van", "Coquitlam"] },
   { key: "# Bath", type: "dropdown", notion_property: "# Bath",
@@ -291,6 +298,7 @@ const CATEGORIES = [
     notionHeading: "Entry, Check In, & Walk-Through Video",
     fields: [
       { key: "Lock Type", type: "text" },
+      { key: "Who changes the passcode?", type: "dropdown", options: ["Opulent Stays", "Owner", "Cleaners"] },
       { key: "Number of Steps to Door", type: "text" },
       { key: "Lock Brand & Model", type: "text" },
       { key: "Lock Battery Replacement Details", type: "text" },
@@ -369,6 +377,64 @@ const CATEGORIES = [
     // NOTE: "Furnance" matches the typo in the actual Notion template
     notionHeading: "Breaker Panel, Gas, Water, Furnance", columns: ["Item"] },
 ];
+
+// ============================================================
+// KITCHEN COMMON ITEMS
+// ============================================================
+const KITCHEN_COMMON_ITEMS = [
+  "Kettle", "Toaster", "Drip Coffee Machine", "Pods Coffee Machine",
+  "Microwave", "Fridge", "Oven", "Steam Oven", "Secondary Fridge",
+  "Secondary Oven", "Secondary Stove", "Electric Stove", "Gas Stove",
+  "Dishwasher", "Water Filter",
+];
+
+// ============================================================
+// BEDROOM / WASHROOM SERIALIZE & PARSE
+// ============================================================
+function serializeBedroomDetails(item) {
+  const parts = [];
+  if (item.bedSize) parts.push(`Size:${item.bedSize}`);
+  if (item.floor) parts.push(`Floor:${item.floor}`);
+  if (item.amenities?.length) parts.push(`Has:${item.amenities.join(",")}`);
+  parts.push(`Ensuite:${item.ensuite || "No"}`);
+  if (item.ensuite === "Yes" && item.showerType) parts.push(`Shower:${item.showerType}`);
+  return parts.join("|");
+}
+function parseBedroomDetails(details) {
+  const result = { bedSize: "", floor: "", amenities: [], ensuite: "No", showerType: "" };
+  if (!details) return result;
+  details.split("|").forEach(part => {
+    const idx = part.indexOf(":");
+    if (idx === -1) return;
+    const key = part.slice(0, idx);
+    const val = part.slice(idx + 1);
+    if (key === "Size") result.bedSize = val;
+    else if (key === "Floor") result.floor = val;
+    else if (key === "Has") result.amenities = val ? val.split(",") : [];
+    else if (key === "Ensuite") result.ensuite = val;
+    else if (key === "Shower") result.showerType = val;
+  });
+  return result;
+}
+function serializeWashroomDetails(item) {
+  const parts = [];
+  if (item.showerType) parts.push(`Shower:${item.showerType}`);
+  if (item.details) parts.push(`Note:${item.details}`);
+  return parts.join("|");
+}
+function parseWashroomDetails(details) {
+  const result = { showerType: "", details: "" };
+  if (!details) return result;
+  details.split("|").forEach(part => {
+    const idx = part.indexOf(":");
+    if (idx === -1) return;
+    const key = part.slice(0, idx);
+    const val = part.slice(idx + 1);
+    if (key === "Shower") result.showerType = val;
+    else if (key === "Note") result.details = val;
+  });
+  return result;
+}
 
 // ============================================================
 // STYLES
@@ -519,6 +585,28 @@ const css = `
 
   .note-box { background: var(--gold-light); border: 1px solid rgba(196,146,42,0.3); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: var(--gold-dark); margin-bottom: 16px; line-height: 1.5; }
   .empty-state { text-align: center; padding: 40px 20px; color: var(--text3); font-size: 14px; }
+
+  .kitchen-checklist { display: flex; flex-direction: column; border: 1.5px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 16px; box-shadow: var(--shadow); }
+  .checklist-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--surface); border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; user-select: none; }
+  .checklist-item:last-child { border-bottom: none; }
+  .checklist-item.checked { background: var(--green-light); }
+  .checklist-check { width: 20px; height: 20px; border: 2px solid var(--border2); border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 12px; font-weight: 700; transition: all 0.15s; color: transparent; }
+  .checklist-item.checked .checklist-check { background: var(--green); border-color: var(--green); color: white; }
+  .checklist-label { font-size: 14px; color: var(--text); transition: color 0.15s; }
+  .checklist-item.checked .checklist-label { color: var(--green); font-weight: 500; }
+
+  .amenities-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+  .amenity-chip { padding: 6px 12px; border: 1.5px solid var(--border2); border-radius: 20px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; color: var(--text2); user-select: none; }
+  .amenity-chip.selected { background: var(--navy); color: white; border-color: var(--navy); }
+  .amenity-chip:hover:not(.selected) { border-color: var(--navy); color: var(--navy); }
+
+  .toggle-group { display: flex; gap: 8px; }
+  .toggle-btn { flex: 1; padding: 9px; border: 1.5px solid var(--border); border-radius: 8px; background: var(--surface); font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; color: var(--text2); }
+  .toggle-btn.active { background: var(--navy); color: white; border-color: var(--navy); }
+  .toggle-btn:hover:not(.active) { border-color: var(--navy); color: var(--navy); }
+
+  .bedroom-label { font-size: 13px; font-weight: 700; color: var(--navy); margin-bottom: 10px; letter-spacing: 0.02em; }
+  .add-buttons-col { display: flex; flex-direction: column; gap: 8px; }
 `;
 
 // ============================================================
@@ -671,6 +759,7 @@ export default function App() {
   const [showNewPropertyForm, setShowNewPropertyForm] = useState(false);
   const [newPropertyData, setNewPropertyData] = useState({ ownerName: "", address: "" });
   const [creatingProperty, setCreatingProperty] = useState(false);
+  const [kitchenChecked, setKitchenChecked] = useState({});
   const saveTimers = useRef({});
 
   const showToast = useCallback((message, type = "success") => {
@@ -729,7 +818,7 @@ export default function App() {
   const selectProperty = async (prop) => {
     setSelectedProperty(prop);
     setFormData({}); setHeaderData({}); setType2Items({});
-    setCategoryStatus({}); setSavedFields({});
+    setCategoryStatus({}); setSavedFields({}); setKitchenChecked({});
     setLoadingOverlay("Loading property data...");
     try {
       const [page, pageData] = await Promise.all([
@@ -750,6 +839,7 @@ export default function App() {
 
       const newFormData = {};
       const newType2Items = {};
+      let newKitchenChecked = {};
       CATEGORIES.forEach(cat => {
         const section = pageData[cat.notionHeading];
         if (!section) return;
@@ -759,15 +849,44 @@ export default function App() {
           if (section.mediaBlocks.length > 0) newFormData[cat.id].media = section.mediaBlocks.map(m => m.url);
         }
         if (cat.type === 2 && section.type === "database") {
-          newType2Items[cat.id] = section.rows.map(row => ({
-            id: row.pageId, pageId: row.pageId,
-            item: row.item, details: row.details,
-            photoUrl: row.photoUrl, videoUrl: row.videoUrl,
-          }));
+          if (cat.id === "kitchen") {
+            const checked = {};
+            const extras = [];
+            section.rows.forEach(row => {
+              if (KITCHEN_COMMON_ITEMS.includes(row.item)) {
+                checked[row.item] = row.pageId;
+              } else {
+                extras.push({ id: row.pageId, pageId: row.pageId, isNew: false, subtype: "item",
+                  item: row.item, details: row.details, photoUrl: row.photoUrl, videoUrl: row.videoUrl });
+              }
+            });
+            newKitchenChecked = checked;
+            newType2Items["kitchen"] = extras;
+          } else if (cat.id === "bedroom") {
+            newType2Items[cat.id] = section.rows.map(row => {
+              if (/^Bedroom \d+/.test(row.item)) {
+                return { id: row.pageId, pageId: row.pageId, isNew: false, subtype: "bedroom",
+                  bedroomLabel: row.item, item: row.item, ...parseBedroomDetails(row.details) };
+              } else if (/^Washroom \d+/.test(row.item)) {
+                return { id: row.pageId, pageId: row.pageId, isNew: false, subtype: "washroom",
+                  washroomLabel: row.item, item: row.item, ...parseWashroomDetails(row.details) };
+              } else {
+                return { id: row.pageId, pageId: row.pageId, isNew: false, subtype: "item",
+                  item: row.item, details: row.details, photoUrl: row.photoUrl, videoUrl: row.videoUrl };
+              }
+            });
+          } else {
+            newType2Items[cat.id] = section.rows.map(row => ({
+              id: row.pageId, pageId: row.pageId,
+              item: row.item, details: row.details,
+              photoUrl: row.photoUrl, videoUrl: row.videoUrl,
+            }));
+          }
         }
       });
       setFormData(newFormData);
       setType2Items(newType2Items);
+      setKitchenChecked(newKitchenChecked);
     } catch { showToast("Could not load existing data", "error"); }
     setLoadingOverlay(null);
     setScreen("step0");
@@ -836,7 +955,48 @@ export default function App() {
   };
 
   const addType2Item = (categoryId) => {
-    setType2Items(d => ({ ...d, [categoryId]: [...(d[categoryId] || []), { item: "", details: "", photoUrl: null, videoUrl: null, id: Date.now(), isNew: true }] }));
+    setType2Items(d => ({ ...d, [categoryId]: [...(d[categoryId] || []), { subtype: "item", item: "", details: "", photoUrl: null, videoUrl: null, id: Date.now(), isNew: true }] }));
+  };
+
+  const addBedroomItem = (categoryId) => {
+    setType2Items(d => {
+      const cur = d[categoryId] || [];
+      const count = cur.filter(i => i.subtype === "bedroom").length + 1;
+      const label = `Bedroom ${count}`;
+      return { ...d, [categoryId]: [...cur, { subtype: "bedroom", id: Date.now(), isNew: true,
+        bedroomLabel: label, item: label, bedSize: "", floor: "", amenities: [], ensuite: "No", showerType: "" }] };
+    });
+  };
+
+  const addWashroomItem = (categoryId) => {
+    setType2Items(d => {
+      const cur = d[categoryId] || [];
+      const count = cur.filter(i => i.subtype === "washroom").length + 1;
+      const label = `Washroom ${count}`;
+      return { ...d, [categoryId]: [...cur, { subtype: "washroom", id: Date.now(), isNew: true,
+        washroomLabel: label, item: label, showerType: "", details: "" }] };
+    });
+  };
+
+  const toggleKitchenItem = async (itemName) => {
+    if (kitchenChecked[itemName]) {
+      const pageId = kitchenChecked[itemName];
+      setKitchenChecked(c => { const n = { ...c }; delete n[itemName]; return n; });
+      if (pageId && pageId !== "__pending__") {
+        try { await notion.archivePage(pageId); } catch { /* silent */ }
+      }
+    } else {
+      setKitchenChecked(c => ({ ...c, [itemName]: "__pending__" }));
+      try {
+        const section = notionPageData["Kitchen & Appliances"];
+        if (section?.tableBlockId) {
+          const newPage = await notion.createDatabaseRow(section.tableBlockId, {
+            Item: { title: [{ text: { content: itemName } }] },
+          });
+          setKitchenChecked(c => ({ ...c, [itemName]: newPage.id }));
+        }
+      } catch { showToast("Save failed", "error"); }
+    }
   };
 
   const updateType2Item = async (categoryId, itemId, field, value) => {
@@ -853,13 +1013,22 @@ export default function App() {
           const item = (current[categoryId] || []).find(i => i.id === itemId);
           if (!item) return current;
           (async () => {
+            let notionItemName, notionDetails;
+            if (item.subtype === "bedroom") {
+              notionItemName = item.bedroomLabel || item.item || "";
+              notionDetails = serializeBedroomDetails(item);
+            } else if (item.subtype === "washroom") {
+              notionItemName = item.washroomLabel || item.item || "";
+              notionDetails = serializeWashroomDetails(item);
+            } else {
+              notionItemName = item.item || "";
+              notionDetails = item.details || "";
+            }
+            const props = { Item: { title: [{ text: { content: notionItemName } }] } };
+            if (cat.columns.includes("Details")) props.Details = { rich_text: [{ text: { content: notionDetails } }] };
             if (item.pageId && !item.isNew) {
-              const props = { Item: { title: [{ text: { content: item.item || "" } }] } };
-              if (cat.columns.includes("Details")) props.Details = { rich_text: [{ text: { content: item.details || "" } }] };
               await notion.updatePage(item.pageId, props);
             } else {
-              const props = { Item: { title: [{ text: { content: item.item || "" } }] } };
-              if (cat.columns.includes("Details")) props.Details = { rich_text: [{ text: { content: item.details || "" } }] };
               const newPage = await notion.createDatabaseRow(section.tableBlockId, props);
               setType2Items(d => ({ ...d, [categoryId]: d[categoryId].map(i => i.id === itemId ? { ...i, pageId: newPage.id, isNew: false } : i) }));
             }
@@ -1050,7 +1219,7 @@ export default function App() {
               </>
             )}
 
-            {currentCategory.type === 2 && (
+            {currentCategory.type === 2 && currentCategory.id !== "kitchen" && currentCategory.id !== "bedroom" && (
               <>
                 <div className="note-box">Each item saves immediately to Notion. Tap + Add Item for each appliance, fixture, or amenity.</div>
                 <div className="type2-items">
@@ -1079,6 +1248,160 @@ export default function App() {
                   ))}
                 </div>
                 <button className="add-item-btn" onClick={() => addType2Item(currentCategory.id)}>+ Add Item</button>
+              </>
+            )}
+
+            {currentCategory.id === "kitchen" && (
+              <>
+                <div className="note-box">Tap to select appliances this property has. Selections save to Notion automatically.</div>
+                <div className="kitchen-checklist">
+                  {KITCHEN_COMMON_ITEMS.map(appliance => (
+                    <div key={appliance}
+                      className={`checklist-item${kitchenChecked[appliance] ? " checked" : ""}`}
+                      onClick={() => toggleKitchenItem(appliance)}>
+                      <div className="checklist-check">{kitchenChecked[appliance] ? "✓" : ""}</div>
+                      <div className="checklist-label">{appliance}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="divider" />
+                {(type2Items["kitchen"] || []).length > 0 && (
+                  <div className="type2-items">
+                    {(type2Items["kitchen"] || []).map(item => (
+                      <div key={item.id} className="type2-item">
+                        <button className="remove-item" onClick={() => removeType2Item("kitchen", item.id)}>×</button>
+                        <div className="item-field-group">
+                          <FieldInput field={{ key: "Item", type: "text" }} value={item.item}
+                            onChange={val => updateType2Item("kitchen", item.id, "item", val)}
+                            saving={savingFields[`kitchen_${item.id}_item`]}
+                            saved={savedFields[`kitchen_${item.id}_item`]} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button className="add-item-btn" onClick={() => addType2Item("kitchen")}>+ Add Item</button>
+              </>
+            )}
+
+            {currentCategory.id === "bedroom" && (
+              <>
+                <div className="type2-items">
+                  {(type2Items["bedroom"] || []).map(item => {
+                    if (item.subtype === "bedroom") {
+                      return (
+                        <div key={item.id} className="type2-item">
+                          <button className="remove-item" onClick={() => removeType2Item("bedroom", item.id)}>×</button>
+                          <div className="item-field-group">
+                            <div className="bedroom-label">{item.bedroomLabel}</div>
+                            <div className="field-wrap">
+                              <div className="field-label">Bed Size</div>
+                              <select className="field-select" value={item.bedSize || ""}
+                                onChange={e => updateType2Item("bedroom", item.id, "bedSize", e.target.value)}>
+                                <option value="">— select —</option>
+                                {["Single", "Double", "Queen", "King", "Cali King"].map(o => <option key={o} value={o}>{o}</option>)}
+                              </select>
+                            </div>
+                            <div className="field-wrap">
+                              <div className="field-label">Floor</div>
+                              <select className="field-select" value={item.floor || ""}
+                                onChange={e => updateType2Item("bedroom", item.id, "floor", e.target.value)}>
+                                <option value="">— select —</option>
+                                {["Basement", "Main Floor", "2nd Floor", "3rd Floor"].map(o => <option key={o} value={o}>{o}</option>)}
+                              </select>
+                            </div>
+                            <div className="field-wrap">
+                              <div className="field-label">Room Features</div>
+                              <div className="amenities-grid">
+                                {["Closet", "Night Stand", "Lamp", "Luggage Stand"].map(a => (
+                                  <div key={a}
+                                    className={`amenity-chip${(item.amenities || []).includes(a) ? " selected" : ""}`}
+                                    onClick={() => {
+                                      const cur = item.amenities || [];
+                                      const next = cur.includes(a) ? cur.filter(x => x !== a) : [...cur, a];
+                                      updateType2Item("bedroom", item.id, "amenities", next);
+                                    }}>
+                                    {a}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="field-wrap">
+                              <div className="field-label">Ensuite</div>
+                              <div className="toggle-group">
+                                {["Yes", "No"].map(v => (
+                                  <button key={v}
+                                    className={`toggle-btn${item.ensuite === v ? " active" : ""}`}
+                                    onClick={() => updateType2Item("bedroom", item.id, "ensuite", v)}>
+                                    {v}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            {item.ensuite === "Yes" && (
+                              <div className="field-wrap">
+                                <div className="field-label">Shower Type</div>
+                                <select className="field-select" value={item.showerType || ""}
+                                  onChange={e => updateType2Item("bedroom", item.id, "showerType", e.target.value)}>
+                                  <option value="">— select —</option>
+                                  {["Bathtub", "Standing", "Both"].map(o => <option key={o} value={o}>{o}</option>)}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    } else if (item.subtype === "washroom") {
+                      return (
+                        <div key={item.id} className="type2-item">
+                          <button className="remove-item" onClick={() => removeType2Item("bedroom", item.id)}>×</button>
+                          <div className="item-field-group">
+                            <div className="bedroom-label">{item.washroomLabel}</div>
+                            <div className="field-wrap">
+                              <div className="field-label">Shower Type</div>
+                              <select className="field-select" value={item.showerType || ""}
+                                onChange={e => updateType2Item("bedroom", item.id, "showerType", e.target.value)}>
+                                <option value="">— select —</option>
+                                {["Bathtub", "Standing", "Both"].map(o => <option key={o} value={o}>{o}</option>)}
+                              </select>
+                            </div>
+                            <FieldInput field={{ key: "Description", type: "text" }} value={item.details || ""}
+                              onChange={val => updateType2Item("bedroom", item.id, "details", val)}
+                              saving={savingFields[`bedroom_${item.id}_details`]}
+                              saved={savedFields[`bedroom_${item.id}_details`]} />
+                          </div>
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div key={item.id} className="type2-item">
+                          <button className="remove-item" onClick={() => removeType2Item("bedroom", item.id)}>×</button>
+                          <div className="item-field-group">
+                            <FieldInput field={{ key: "Item", type: "text" }} value={item.item}
+                              onChange={val => updateType2Item("bedroom", item.id, "item", val)}
+                              saving={savingFields[`bedroom_${item.id}_item`]}
+                              saved={savedFields[`bedroom_${item.id}_item`]} />
+                            <FieldInput field={{ key: "Details", type: "text" }} value={item.details}
+                              onChange={val => updateType2Item("bedroom", item.id, "details", val)}
+                              saving={savingFields[`bedroom_${item.id}_details`]}
+                              saved={savedFields[`bedroom_${item.id}_details`]} />
+                            <MediaUpload label="Add Photo" accept="image/*"
+                              onUploaded={url => updateType2Item("bedroom", item.id, "photoUrl", url)}
+                              existingUrls={item.photoUrl ? [item.photoUrl] : []} />
+                            <MediaUpload label="Add Video" accept="video/*"
+                              onUploaded={url => updateType2Item("bedroom", item.id, "videoUrl", url)}
+                              existingUrls={item.videoUrl ? [item.videoUrl] : []} />
+                          </div>
+                        </div>
+                      );
+                    }
+                  })}
+                </div>
+                <div className="add-buttons-col">
+                  <button className="add-item-btn" onClick={() => addBedroomItem("bedroom")}>🛏 + Add Bedroom</button>
+                  <button className="add-item-btn" onClick={() => addWashroomItem("bedroom")}>🚿 + Add Washroom</button>
+                  <button className="add-item-btn" onClick={() => addType2Item("bedroom")}>+ Add Item</button>
+                </div>
               </>
             )}
 
