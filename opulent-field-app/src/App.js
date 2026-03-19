@@ -1073,7 +1073,9 @@ export default function App() {
   const markDone = async (id) => {
     const cat = CATEGORIES.find(c => c.id === id);
     if (cat?.type === 2) {
-      const unsaved = (type2Items[id] || []).filter(i => !i.pageId || i.isNew);
+      let latestItems;
+      setType2Items(current => { latestItems = current; return current; });
+      const unsaved = (latestItems[id] || []).filter(i => !i.pageId || i.isNew);
       if (unsaved.length > 0) {
         setLoadingOverlay("Saving to Notion...");
         try {
