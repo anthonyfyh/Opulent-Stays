@@ -965,23 +965,27 @@ export default function App() {
   };
 
   const addBedroomItem = (categoryId) => {
+    const newId = Date.now();
     setType2Items(d => {
       const cur = d[categoryId] || [];
       const count = cur.filter(i => i.subtype === "bedroom").length + 1;
       const label = `Bedroom ${count}`;
-      return { ...d, [categoryId]: [...cur, { subtype: "bedroom", id: Date.now(), isNew: true,
+      return { ...d, [categoryId]: [...cur, { subtype: "bedroom", id: newId, isNew: true,
         bedroomLabel: label, item: label, bedSize: "", floor: "", amenities: [], ensuite: "No", showerType: "" }] };
     });
+    setTimeout(() => updateType2Item(categoryId, newId, "ensuite", "No"), 0);
   };
 
   const addWashroomItem = (categoryId) => {
+    const newId = Date.now();
     setType2Items(d => {
       const cur = d[categoryId] || [];
       const count = cur.filter(i => i.subtype === "washroom").length + 1;
       const label = `Washroom ${count}`;
-      return { ...d, [categoryId]: [...cur, { subtype: "washroom", id: Date.now(), isNew: true,
+      return { ...d, [categoryId]: [...cur, { subtype: "washroom", id: newId, isNew: true,
         washroomLabel: label, item: label, showerType: "", details: "" }] };
     });
+    setTimeout(() => updateType2Item(categoryId, newId, "showerType", ""), 0);
   };
 
   const toggleKitchenItem = async (itemName) => {
