@@ -394,6 +394,29 @@ const TYPE2_DB_SCHEMAS = {
 };
 
 // ============================================================
+// TYPE 2 PROPS BUILDER
+// ============================================================
+function buildType2Props(cat, item) {
+  if (item.subtype === "bedroom") {
+    const props = { Item: { title: [{ text: { content: item.bedroomLabel || item.item || "" } }] } };
+    if (item.floor) props["Floor"] = { select: { name: item.floor } };
+    if (item.bedSize) props["Bed Size"] = { select: { name: item.bedSize } };
+    if (item.amenities?.length) props["Amenities"] = { multi_select: item.amenities.map(a => ({ name: a })) };
+    props["Ensuite"] = { select: { name: item.ensuite || "No" } };
+    if (item.showerType) props["Shower Type"] = { select: { name: item.showerType } };
+    return props;
+  }
+  if (item.subtype === "washroom") {
+    const props = { Item: { title: [{ text: { content: item.washroomLabel || item.item || "" } }] } };
+    if (item.showerType) props["Shower Type"] = { select: { name: item.showerType } };
+    return props;
+  }
+  const props = { Item: { title: [{ text: { content: item.item || "" } }] } };
+  if (cat.columns.includes("Details") && item.details) props["Details"] = { rich_text: [{ text: { content: item.details } }] };
+  return props;
+}
+
+// ============================================================
 // KITCHEN COMMON ITEMS
 // ============================================================
 const KITCHEN_COMMON_ITEMS = [
@@ -965,28 +988,23 @@ export default function App() {
   };
 
   const addBedroomItem = (categoryId) => {
-    const newId = Date.now();
     setType2Items(d => {
       const cur = d[categoryId] || [];
       const count = cur.filter(i => i.subtype === "bedroom").length + 1;
       const label = `Bedroom ${count}`;
-      return { ...d, [categoryId]: [...cur, { subtype: "bedroom", id: newId, isNew: true,
+      return { ...d, [categoryId]: [...cur, { subtype: "bedroom", id: Date.now(), isNew: true,
         bedroomLabel: label, item: label, bedSize: "", floor: "", amenities: [], ensuite: "No", showerType: "" }] };
     });
-    setTimeout(() => updateType2Item(categoryId, newId, "ensuite", "No"), 0);
   };
 
   const addWashroomItem = (categoryId) => {
-    const newId = Date.now();
-    let capturedLabel = "";
     setType2Items(d => {
       const cur = d[categoryId] || [];
       const count = cur.filter(i => i.subtype === "washroom").length + 1;
-      capturedLabel = `Washroom ${count}`;
-      return { ...d, [categoryId]: [...cur, { subtype: "washroom", id: newId, isNew: true,
-        washroomLabel: capturedLabel, item: capturedLabel, showerType: "", details: "" }] };
+      const label = `Washroom ${count}`;
+      return { ...d, [categoryId]: [...cur, { subtype: "washroom", id: Date.now(), isNew: true,
+        washroomLabel: label, item: label, showerType: "", details: "" }] };
     });
-    setTimeout(() => updateType2Item(categoryId, newId, "washroomLabel", capturedLabel), 0);
   };
 
   const toggleKitchenItem = async (itemName) => {
@@ -1024,58 +1042,21 @@ export default function App() {
     }
   };
 
-  const updateType2Item = async (categoryId, itemId, field, value) => {
+  const updateType2Item = (categoryId, itemId, field, value) => {
     setType2Items(d => ({ ...d, [categoryId]: (d[categoryId] || []).map(i => i.id === itemId ? { ...i, [field]: value } : i) }));
+    // Only debounce-update items already saved in Notion; new items are saved on "Done ✓"
+    const existing = (type2Items[categoryId] || []).find(i => i.id === itemId);
+    if (!existing?.pageId || existing.isNew) return;
+    const cat = CATEGORIES.find(c => c.id === categoryId);
     const saveKey = `${categoryId}_${itemId}_${field}`;
     clearTimeout(saveTimers.current[saveKey]);
     setSavingFields(s => ({ ...s, [saveKey]: true }));
     saveTimers.current[saveKey] = setTimeout(async () => {
       try {
-        const cat = CATEGORIES.find(c => c.id === categoryId);
-        const section = notionPageData[cat.notionHeading];
-        let tableBlockId = section?.tableBlockId || createdDbIds.current[cat.notionHeading];
-        if (!tableBlockId) {
-          if (!creatingDbPromises.current[cat.notionHeading]) {
-            const schema = TYPE2_DB_SCHEMAS[cat.id] || { "Item": { "title": {} } };
-            creatingDbPromises.current[cat.notionHeading] = notion.createDatabase(selectedProperty.id, cat.title, schema)
-              .then(db => {
-                createdDbIds.current[cat.notionHeading] = db.id;
-                setNotionPageData(prev => ({
-                  ...prev,
-                  [cat.notionHeading]: { ...(prev[cat.notionHeading] || { blockId: null, rows: [], mediaBlocks: [] }), tableBlockId: db.id, type: "database" },
-                }));
-                return db.id;
-              });
-          }
-          tableBlockId = await creatingDbPromises.current[cat.notionHeading];
-        }
         let latestItem;
-        setType2Items(current => {
-          latestItem = (current[categoryId] || []).find(i => i.id === itemId);
-          return current;
-        });
+        setType2Items(current => { latestItem = (current[categoryId] || []).find(i => i.id === itemId); return current; });
         if (!latestItem) return;
-        let props;
-        if (latestItem.subtype === "bedroom") {
-          props = { Item: { title: [{ text: { content: latestItem.bedroomLabel || latestItem.item || "" } }] } };
-          if (latestItem.floor) props["Floor"] = { select: { name: latestItem.floor } };
-          if (latestItem.bedSize) props["Bed Size"] = { select: { name: latestItem.bedSize } };
-          if (latestItem.amenities?.length) props["Amenities"] = { multi_select: latestItem.amenities.map(a => ({ name: a })) };
-          props["Ensuite"] = { select: { name: latestItem.ensuite || "No" } };
-          if (latestItem.showerType) props["Shower Type"] = { select: { name: latestItem.showerType } };
-        } else if (latestItem.subtype === "washroom") {
-          props = { Item: { title: [{ text: { content: latestItem.washroomLabel || latestItem.item || "" } }] } };
-          if (latestItem.showerType) props["Shower Type"] = { select: { name: latestItem.showerType } };
-        } else {
-          props = { Item: { title: [{ text: { content: latestItem.item || "" } }] } };
-          if (cat.columns.includes("Details") && latestItem.details) props["Details"] = { rich_text: [{ text: { content: latestItem.details } }] };
-        }
-        if (latestItem.pageId && !latestItem.isNew) {
-          await notion.updatePage(latestItem.pageId, props);
-        } else {
-          const newPage = await notion.createDatabaseRow(tableBlockId, props);
-          setType2Items(d => ({ ...d, [categoryId]: d[categoryId].map(i => i.id === itemId ? { ...i, pageId: newPage.id, isNew: false } : i) }));
-        }
+        await notion.updatePage(latestItem.pageId, buildType2Props(cat, latestItem));
         setSavingFields(s => ({ ...s, [saveKey]: false }));
         setSavedFields(s => ({ ...s, [saveKey]: true }));
       } catch (e) {
@@ -1089,7 +1070,35 @@ export default function App() {
     setType2Items(d => ({ ...d, [categoryId]: d[categoryId].filter(i => i.id !== itemId) }));
   };
 
-  const markDone = (id) => { setCategoryStatus(s => ({ ...s, [id]: "done" })); setScreen("overview"); };
+  const markDone = async (id) => {
+    const cat = CATEGORIES.find(c => c.id === id);
+    if (cat?.type === 2) {
+      const unsaved = (type2Items[id] || []).filter(i => !i.pageId || i.isNew);
+      if (unsaved.length > 0) {
+        setLoadingOverlay("Saving to Notion...");
+        try {
+          let tableBlockId = notionPageData[cat.notionHeading]?.tableBlockId || createdDbIds.current[cat.notionHeading];
+          if (!tableBlockId) {
+            const schema = TYPE2_DB_SCHEMAS[cat.id] || { "Item": { "title": {} } };
+            const db = await notion.createDatabase(selectedProperty.id, cat.title, schema);
+            tableBlockId = db.id;
+            createdDbIds.current[cat.notionHeading] = db.id;
+          }
+          for (const item of unsaved) {
+            const newPage = await notion.createDatabaseRow(tableBlockId, buildType2Props(cat, item));
+            setType2Items(d => ({ ...d, [id]: (d[id] || []).map(i => i.id === item.id ? { ...i, pageId: newPage.id, isNew: false } : i) }));
+          }
+        } catch (e) {
+          showToast(e.message || "Save failed", "error");
+          setLoadingOverlay(null);
+          return;
+        }
+        setLoadingOverlay(null);
+      }
+    }
+    setCategoryStatus(s => ({ ...s, [id]: "done" }));
+    setScreen("overview");
+  };
   const markSkipped = (id) => { setCategoryStatus(s => ({ ...s, [id]: "skipped" })); setScreen("overview"); };
   const openCategory = (idx) => { setCurrentCategoryIdx(idx); setScreen("category"); };
 
