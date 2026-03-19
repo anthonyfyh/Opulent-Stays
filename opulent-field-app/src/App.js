@@ -978,14 +978,15 @@ export default function App() {
 
   const addWashroomItem = (categoryId) => {
     const newId = Date.now();
+    let capturedLabel = "";
     setType2Items(d => {
       const cur = d[categoryId] || [];
       const count = cur.filter(i => i.subtype === "washroom").length + 1;
-      const label = `Washroom ${count}`;
+      capturedLabel = `Washroom ${count}`;
       return { ...d, [categoryId]: [...cur, { subtype: "washroom", id: newId, isNew: true,
-        washroomLabel: label, item: label, showerType: "", details: "" }] };
+        washroomLabel: capturedLabel, item: capturedLabel, showerType: "", details: "" }] };
     });
-    setTimeout(() => updateType2Item(categoryId, newId, "showerType", ""), 0);
+    setTimeout(() => updateType2Item(categoryId, newId, "washroomLabel", capturedLabel), 0);
   };
 
   const toggleKitchenItem = async (itemName) => {
@@ -1024,7 +1025,7 @@ export default function App() {
   };
 
   const updateType2Item = async (categoryId, itemId, field, value) => {
-    setType2Items(d => ({ ...d, [categoryId]: d[categoryId].map(i => i.id === itemId ? { ...i, [field]: value } : i) }));
+    setType2Items(d => ({ ...d, [categoryId]: (d[categoryId] || []).map(i => i.id === itemId ? { ...i, [field]: value } : i) }));
     const saveKey = `${categoryId}_${itemId}_${field}`;
     clearTimeout(saveTimers.current[saveKey]);
     setSavingFields(s => ({ ...s, [saveKey]: true }));
