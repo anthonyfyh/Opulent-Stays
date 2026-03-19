@@ -124,7 +124,6 @@ function buildPropertyTemplate() {
   });
   const makeHeading = (text) => ({ object: "block", type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: text } }] } });
   const makeParagraph = (text = "") => ({ object: "block", type: "paragraph", paragraph: { rich_text: text ? [{ type: "text", text: { content: text } }] : [] } });
-  const makeDbPlaceholder = (name) => makeParagraph(`↓ Add inline database here for: ${name}`);
 
   return [
     // Backend only
@@ -407,15 +406,7 @@ const KITCHEN_COMMON_ITEMS = [
 // ============================================================
 // BEDROOM / WASHROOM SERIALIZE & PARSE
 // ============================================================
-function serializeBedroomDetails(item) {
-  const parts = [];
-  if (item.bedSize) parts.push(`Size:${item.bedSize}`);
-  if (item.floor) parts.push(`Floor:${item.floor}`);
-  if (item.amenities?.length) parts.push(`Has:${item.amenities.join(",")}`);
-  parts.push(`Ensuite:${item.ensuite || "No"}`);
-  if (item.ensuite === "Yes" && item.showerType) parts.push(`Shower:${item.showerType}`);
-  return parts.join("|");
-}
+
 function parseBedroomDetails(details) {
   const result = { bedSize: "", floor: "", amenities: [], ensuite: "No", showerType: "" };
   if (!details) return result;
@@ -432,12 +423,7 @@ function parseBedroomDetails(details) {
   });
   return result;
 }
-function serializeWashroomDetails(item) {
-  const parts = [];
-  if (item.showerType) parts.push(`Shower:${item.showerType}`);
-  if (item.details) parts.push(`Note:${item.details}`);
-  return parts.join("|");
-}
+
 function parseWashroomDetails(details) {
   const result = { showerType: "", details: "" };
   if (!details) return result;
