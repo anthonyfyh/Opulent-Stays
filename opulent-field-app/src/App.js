@@ -68,9 +68,7 @@ const notion = {
     if (!res.ok) throw new Error(data.message || "Failed to create row");
     return data;
   },
-  async createDatabase(pageId, title, hasDetails) {
-    const properties = { "Item": { "title": {} } };
-    if (hasDetails) properties["Details"] = { "rich_text": {} };
+  async createDatabase(pageId, title, properties) {
     const res = await fetch(`/api/notion?endpoint=databases`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -175,23 +173,6 @@ function buildPropertyTemplate() {
 
     makeHeading("🏢 Building Info (if applicable)"),
     makeTable(["Elevator Notes", "Concierge Hours", "Amenities Access", "Strata Restrictions", "Building Notes"]),
-    makeParagraph(),
-
-    // Type 2 — inline databases (placeholders; user adds DB in Notion)
-    makeHeading("Bedroom & Washroom"),
-    makeDbPlaceholder("Bedroom & Washroom"),
-    makeParagraph(),
-
-    makeHeading("Amenities"),
-    makeDbPlaceholder("Amenities"),
-    makeParagraph(),
-
-    makeHeading("🍳 Kitchen & Appliances"),
-    makeDbPlaceholder("Kitchen & Appliances"),
-    makeParagraph(),
-
-    makeHeading("🔌 Breaker Panel, Gas, Water, Furnance"),
-    makeDbPlaceholder("Breaker Panel, Gas, Water, Furnance"),
     makeParagraph(),
 
     // Backend only
@@ -386,7 +367,7 @@ const CATEGORIES = [
       { key: "Building Notes", type: "text" },
     ]},
   { id: "bedroom", order: 10, type: 2, emoji: "🛏️", title: "Bedroom & Washroom",
-    notionHeading: "Bedroom & Washroom", columns: ["Item", "Details"] },
+    notionHeading: "Bedroom & Washroom", columns: ["Item", "Floor", "Bed Size", "Amenities", "Ensuite", "Shower Type"] },
   { id: "amenities", order: 11, type: 2, emoji: "✨", title: "Amenities",
     notionHeading: "Amenities", columns: ["Item"] },
   { id: "kitchen", order: 12, type: 2, emoji: "🍳", title: "Kitchen & Appliances",
@@ -395,6 +376,23 @@ const CATEGORIES = [
     // NOTE: "Furnance" matches the typo in the actual Notion template
     notionHeading: "Breaker Panel, Gas, Water, Furnance", columns: ["Item"] },
 ];
+
+// ============================================================
+// NOTION DATABASE SCHEMAS FOR TYPE 2 CATEGORIES
+// ============================================================
+const TYPE2_DB_SCHEMAS = {
+  bedroom: {
+    "Item":       { "title": {} },
+    "Floor":      { "select": {} },
+    "Bed Size":   { "select": {} },
+    "Amenities":  { "multi_select": {} },
+    "Ensuite":    { "select": {} },
+    "Shower Type":{ "select": {} },
+  },
+  amenities: { "Item": { "title": {} } },
+  kitchen:   { "Item": { "title": {} } },
+  breaker:   { "Item": { "title": {} }, "Details": { "rich_text": {} } },
+};
 
 // ============================================================
 // KITCHEN COMMON ITEMS
@@ -780,6 +778,7 @@ export default function App() {
   const [kitchenChecked, setKitchenChecked] = useState({});
   const saveTimers = useRef({});
   const createdDbIds = useRef({});
+  const creatingDbPromises = useRef({});
 
   const showToast = useCallback((message, type = "success") => {
     setToast({ message, type });
@@ -839,6 +838,7 @@ export default function App() {
     setFormData({}); setHeaderData({}); setType2Items({});
     setCategoryStatus({}); setSavedFields({}); setKitchenChecked({});
     createdDbIds.current = {};
+    creatingDbPromises.current = {};
     setLoadingOverlay("Loading property data...");
     try {
       const [page, pageData] = await Promise.all([
@@ -1011,13 +1011,19 @@ export default function App() {
         const kitchenSection = notionPageData["Kitchen & Appliances"];
         let tableBlockId = kitchenSection?.tableBlockId || createdDbIds.current["Kitchen & Appliances"];
         if (!tableBlockId) {
-          const db = await notion.createDatabase(selectedProperty.id, "Kitchen & Appliances", false);
-          tableBlockId = db.id;
-          createdDbIds.current["Kitchen & Appliances"] = db.id;
-          setNotionPageData(prev => ({
-            ...prev,
-            "Kitchen & Appliances": { ...(prev["Kitchen & Appliances"] || { blockId: null, rows: [], mediaBlocks: [] }), tableBlockId: db.id, type: "database" },
-          }));
+          if (!creatingDbPromises.current["Kitchen & Appliances"]) {
+            creatingDbPromises.current["Kitchen & Appliances"] = notion.createDatabase(
+              selectedProperty.id, "Kitchen & Appliances", TYPE2_DB_SCHEMAS.kitchen
+            ).then(db => {
+              createdDbIds.current["Kitchen & Appliances"] = db.id;
+              setNotionPageData(prev => ({
+                ...prev,
+                "Kitchen & Appliances": { ...(prev["Kitchen & Appliances"] || { blockId: null, rows: [], mediaBlocks: [] }), tableBlockId: db.id, type: "database" },
+              }));
+              return db.id;
+            });
+          }
+          tableBlockId = await creatingDbPromises.current["Kitchen & Appliances"];
         }
         const newPage = await notion.createDatabaseRow(tableBlockId, {
           Item: { title: [{ text: { content: itemName } }] },
@@ -1038,14 +1044,19 @@ export default function App() {
         const section = notionPageData[cat.notionHeading];
         let tableBlockId = section?.tableBlockId || createdDbIds.current[cat.notionHeading];
         if (!tableBlockId) {
-          const hasDetails = cat.columns?.includes("Details");
-          const db = await notion.createDatabase(selectedProperty.id, cat.title, hasDetails);
-          tableBlockId = db.id;
-          createdDbIds.current[cat.notionHeading] = db.id;
-          setNotionPageData(prev => ({
-            ...prev,
-            [cat.notionHeading]: { ...(prev[cat.notionHeading] || { blockId: null, rows: [], mediaBlocks: [] }), tableBlockId: db.id, type: "database" },
-          }));
+          if (!creatingDbPromises.current[cat.notionHeading]) {
+            const schema = TYPE2_DB_SCHEMAS[cat.id] || { "Item": { "title": {} } };
+            creatingDbPromises.current[cat.notionHeading] = notion.createDatabase(selectedProperty.id, cat.title, schema)
+              .then(db => {
+                createdDbIds.current[cat.notionHeading] = db.id;
+                setNotionPageData(prev => ({
+                  ...prev,
+                  [cat.notionHeading]: { ...(prev[cat.notionHeading] || { blockId: null, rows: [], mediaBlocks: [] }), tableBlockId: db.id, type: "database" },
+                }));
+                return db.id;
+              });
+          }
+          tableBlockId = await creatingDbPromises.current[cat.notionHeading];
         }
         let latestItem;
         setType2Items(current => {
@@ -1053,19 +1064,21 @@ export default function App() {
           return current;
         });
         if (!latestItem) return;
-        let notionItemName, notionDetails;
+        let props;
         if (latestItem.subtype === "bedroom") {
-          notionItemName = latestItem.bedroomLabel || latestItem.item || "";
-          notionDetails = serializeBedroomDetails(latestItem);
+          props = { Item: { title: [{ text: { content: latestItem.bedroomLabel || latestItem.item || "" } }] } };
+          if (latestItem.floor) props["Floor"] = { select: { name: latestItem.floor } };
+          if (latestItem.bedSize) props["Bed Size"] = { select: { name: latestItem.bedSize } };
+          if (latestItem.amenities?.length) props["Amenities"] = { multi_select: latestItem.amenities.map(a => ({ name: a })) };
+          props["Ensuite"] = { select: { name: latestItem.ensuite || "No" } };
+          if (latestItem.showerType) props["Shower Type"] = { select: { name: latestItem.showerType } };
         } else if (latestItem.subtype === "washroom") {
-          notionItemName = latestItem.washroomLabel || latestItem.item || "";
-          notionDetails = serializeWashroomDetails(latestItem);
+          props = { Item: { title: [{ text: { content: latestItem.washroomLabel || latestItem.item || "" } }] } };
+          if (latestItem.showerType) props["Shower Type"] = { select: { name: latestItem.showerType } };
         } else {
-          notionItemName = latestItem.item || "";
-          notionDetails = latestItem.details || "";
+          props = { Item: { title: [{ text: { content: latestItem.item || "" } }] } };
+          if (cat.columns.includes("Details") && latestItem.details) props["Details"] = { rich_text: [{ text: { content: latestItem.details } }] };
         }
-        const props = { Item: { title: [{ text: { content: notionItemName } }] } };
-        if (cat.columns.includes("Details")) props.Details = { rich_text: [{ text: { content: notionDetails } }] };
         if (latestItem.pageId && !latestItem.isNew) {
           await notion.updatePage(latestItem.pageId, props);
         } else {
