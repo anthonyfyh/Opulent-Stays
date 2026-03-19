@@ -64,7 +64,25 @@ const notion = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ parent: { database_id: databaseId }, properties }),
     });
-    return res.json();
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || "Failed to create row");
+    return data;
+  },
+  async createDatabase(pageId, title, hasDetails) {
+    const properties = { "Item": { "title": {} } };
+    if (hasDetails) properties["Details"] = { "rich_text": {} };
+    const res = await fetch(`/api/notion?endpoint=databases`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        parent: { type: "page_id", page_id: pageId },
+        is_inline: true,
+        title: [{ type: "text", text: { content: title } }],
+        properties,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || "Failed to create database");
+    return data;
   },
   async archivePage(pageId) {
     const res = await fetch(`/api/notion?endpoint=pages/${pageId}`, {
@@ -761,6 +779,7 @@ export default function App() {
   const [creatingProperty, setCreatingProperty] = useState(false);
   const [kitchenChecked, setKitchenChecked] = useState({});
   const saveTimers = useRef({});
+  const createdDbIds = useRef({});
 
   const showToast = useCallback((message, type = "success") => {
     setToast({ message, type });
@@ -819,6 +838,7 @@ export default function App() {
     setSelectedProperty(prop);
     setFormData({}); setHeaderData({}); setType2Items({});
     setCategoryStatus({}); setSavedFields({}); setKitchenChecked({});
+    createdDbIds.current = {};
     setLoadingOverlay("Loading property data...");
     try {
       const [page, pageData] = await Promise.all([
@@ -988,13 +1008,21 @@ export default function App() {
     } else {
       setKitchenChecked(c => ({ ...c, [itemName]: "__pending__" }));
       try {
-        const section = notionPageData["Kitchen & Appliances"];
-        if (section?.tableBlockId) {
-          const newPage = await notion.createDatabaseRow(section.tableBlockId, {
-            Item: { title: [{ text: { content: itemName } }] },
-          });
-          setKitchenChecked(c => ({ ...c, [itemName]: newPage.id }));
+        const kitchenSection = notionPageData["Kitchen & Appliances"];
+        let tableBlockId = kitchenSection?.tableBlockId || createdDbIds.current["Kitchen & Appliances"];
+        if (!tableBlockId) {
+          const db = await notion.createDatabase(selectedProperty.id, "Kitchen & Appliances", false);
+          tableBlockId = db.id;
+          createdDbIds.current["Kitchen & Appliances"] = db.id;
+          setNotionPageData(prev => ({
+            ...prev,
+            "Kitchen & Appliances": { ...(prev["Kitchen & Appliances"] || { blockId: null, rows: [], mediaBlocks: [] }), tableBlockId: db.id, type: "database" },
+          }));
         }
+        const newPage = await notion.createDatabaseRow(tableBlockId, {
+          Item: { title: [{ text: { content: itemName } }] },
+        });
+        setKitchenChecked(c => ({ ...c, [itemName]: newPage.id }));
       } catch { showToast("Save failed", "error"); }
     }
   };
@@ -1008,38 +1036,47 @@ export default function App() {
       try {
         const cat = CATEGORIES.find(c => c.id === categoryId);
         const section = notionPageData[cat.notionHeading];
-        if (!section?.tableBlockId) return;
+        let tableBlockId = section?.tableBlockId || createdDbIds.current[cat.notionHeading];
+        if (!tableBlockId) {
+          const hasDetails = cat.columns?.includes("Details");
+          const db = await notion.createDatabase(selectedProperty.id, cat.title, hasDetails);
+          tableBlockId = db.id;
+          createdDbIds.current[cat.notionHeading] = db.id;
+          setNotionPageData(prev => ({
+            ...prev,
+            [cat.notionHeading]: { ...(prev[cat.notionHeading] || { blockId: null, rows: [], mediaBlocks: [] }), tableBlockId: db.id, type: "database" },
+          }));
+        }
+        let latestItem;
         setType2Items(current => {
-          const item = (current[categoryId] || []).find(i => i.id === itemId);
-          if (!item) return current;
-          (async () => {
-            let notionItemName, notionDetails;
-            if (item.subtype === "bedroom") {
-              notionItemName = item.bedroomLabel || item.item || "";
-              notionDetails = serializeBedroomDetails(item);
-            } else if (item.subtype === "washroom") {
-              notionItemName = item.washroomLabel || item.item || "";
-              notionDetails = serializeWashroomDetails(item);
-            } else {
-              notionItemName = item.item || "";
-              notionDetails = item.details || "";
-            }
-            const props = { Item: { title: [{ text: { content: notionItemName } }] } };
-            if (cat.columns.includes("Details")) props.Details = { rich_text: [{ text: { content: notionDetails } }] };
-            if (item.pageId && !item.isNew) {
-              await notion.updatePage(item.pageId, props);
-            } else {
-              const newPage = await notion.createDatabaseRow(section.tableBlockId, props);
-              setType2Items(d => ({ ...d, [categoryId]: d[categoryId].map(i => i.id === itemId ? { ...i, pageId: newPage.id, isNew: false } : i) }));
-            }
-          })();
+          latestItem = (current[categoryId] || []).find(i => i.id === itemId);
           return current;
         });
+        if (!latestItem) return;
+        let notionItemName, notionDetails;
+        if (latestItem.subtype === "bedroom") {
+          notionItemName = latestItem.bedroomLabel || latestItem.item || "";
+          notionDetails = serializeBedroomDetails(latestItem);
+        } else if (latestItem.subtype === "washroom") {
+          notionItemName = latestItem.washroomLabel || latestItem.item || "";
+          notionDetails = serializeWashroomDetails(latestItem);
+        } else {
+          notionItemName = latestItem.item || "";
+          notionDetails = latestItem.details || "";
+        }
+        const props = { Item: { title: [{ text: { content: notionItemName } }] } };
+        if (cat.columns.includes("Details")) props.Details = { rich_text: [{ text: { content: notionDetails } }] };
+        if (latestItem.pageId && !latestItem.isNew) {
+          await notion.updatePage(latestItem.pageId, props);
+        } else {
+          const newPage = await notion.createDatabaseRow(tableBlockId, props);
+          setType2Items(d => ({ ...d, [categoryId]: d[categoryId].map(i => i.id === itemId ? { ...i, pageId: newPage.id, isNew: false } : i) }));
+        }
         setSavingFields(s => ({ ...s, [saveKey]: false }));
         setSavedFields(s => ({ ...s, [saveKey]: true }));
-      } catch {
+      } catch (e) {
         setSavingFields(s => ({ ...s, [saveKey]: false }));
-        showToast("Save failed", "error");
+        showToast(e.message || "Save failed", "error");
       }
     }, 800);
   };
